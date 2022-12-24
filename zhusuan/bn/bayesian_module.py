@@ -12,12 +12,15 @@ class BModule(nn.Module):
     def forward(self, x):
         raise NotImplementedError()
 
-    def elbo_estimator(self, data, target, n_samples, criterion, len_dataset):
+    def elbo_estimator(self, data, target, n_samples, criterion, len_dataset, batch_size, batch_idx=None, weight_type='Graves'):
         loss = 0.
         for _ in range(n_samples):
             outputs = self(data)
             loss += criterion(outputs, target)
-            loss += self.kl_divergence() / len_dataset
+            loss += self.kl_divergence() * self.complexity_cost_weight(len_dataset,
+                                                                       batch_size,
+                                                                       batch_idx,
+                                                                       weight_type)
         return loss / n_samples
 
     def kl_divergence(self):
@@ -25,6 +28,16 @@ class BModule(nn.Module):
         for _, layer in self._modules.items():
             kl_divergence += layer.log_variational_posterior - layer.log_prior
         return kl_divergence
+
+    def complexity_cost_weight(self, len_dataset, batch_size, batch_idx=None, weight_type='Graves'):
+        M = int(len_dataset / batch_size)
+        if weight_type == 'Graves':
+            return 1 / (M * batch_size)
+        elif weight_type == 'Blundell':
+            pi_i = (2 ** (M - batch_idx)) / (2 ** M - 1)
+            return pi_i / batch_size
+        else:
+            raise NotImplementedError()
 
 
 class Scale_Mixture_Prior(nn.Module):

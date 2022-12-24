@@ -35,37 +35,6 @@ class Bayes_LeNet5(bn.BModule):
         return x
 
 
-def train_model(model, train_loader, n_samples, criterion, optimizer, epoch, device):
-    model.train()
-    pbar_training = tqdm(train_loader)
-    for i, (data, target) in enumerate(pbar_training):
-        pbar_training.set_description(f'Epoch={epoch+1} training')
-        data, target = data.to(device), target.to(device)
-
-        loss = model.elbo_estimator(
-            data, target, n_samples, criterion, len(train_loader.dataset))
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-
-def eval_model(model, test_loader, epoch, device):
-    model.eval()
-    acc = 0.
-    pbar_testing = tqdm(test_loader)
-    for i, (data, target) in enumerate(pbar_testing):
-        pbar_testing.set_description(f'Epoch={epoch+1} testing')
-        data, target = data.to(device), target.to(device)
-        outputs = model(data)
-        preds = outputs.argmax(dim=1)
-        acc += torch.sum(preds.eq(target)).item()
-
-    acc = acc / len(test_loader.dataset)
-    print(f'acc = {100 * acc}%')
-    return acc
-
-
 def save_model(model_name, model):
     if not os.path.isdir('checkpoint'):
         os.mkdir('checkpoint')
@@ -80,11 +49,12 @@ if __name__ == '__main__':
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    n_samples = 4
+    n_samples = 20
     epoch_size = 20
-    batch_size = 64
-    learning_rate = 0.01
+    batch_size = 128
+    learning_rate = 0.005
     data_path = 'data/cifar10'
+    complexity_cost_weight_type = 'Blundell'
 
     train_datasets = datasets.CIFAR10(data_path, train=True, download=True,
                                       transform=transforms.Compose([
@@ -96,7 +66,7 @@ if __name__ == '__main__':
                                      ]))
 
     train_loader = tud.DataLoader(
-        train_datasets, batch_size=batch_size, shuffle=True)
+        train_datasets, batch_size=batch_size, shuffle=True, drop_last=True)
     test_loader = tud.DataLoader(
         test_datasets, batch_size=batch_size)
 
@@ -105,17 +75,55 @@ if __name__ == '__main__':
     optimizer = optim.Adam(model.parameters(), learning_rate)
     criterion = nn.CrossEntropyLoss()
 
-    highest_acc = 0.9
+    highest_acc = 0.6
     for epoch in range(epoch_size):
-        train_model(model, train_loader, n_samples,
-                    criterion, optimizer, epoch, device)
-        acc = eval_model(model, test_loader, epoch, device)
+        pbar_training = tqdm(train_loader)
+        model.train()
+        for i, (data, target) in enumerate(pbar_training):
+            pbar_training.set_description(f'Epoch={epoch+1} training')
+            data, target = data.to(device), target.to(device)
+
+            if complexity_cost_weight_type == 'Graves':
+                loss = model.elbo_estimator(
+                    data, target, n_samples, nn.CrossEntropyLoss(), len(train_datasets), batch_size)
+            elif complexity_cost_weight_type == 'Blundell':
+                loss = model.elbo_estimator(
+                    data, target, n_samples, nn.CrossEntropyLoss(), len(train_datasets), batch_size, i + 1, 'Blundell')
+            else:
+                raise NotImplementedError()
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        model.eval()
+        acc = 0.
+        pbar_testing = tqdm(test_loader)
+        for i, (data, target) in enumerate(pbar_testing):
+            pbar_testing.set_description(f'Epoch={epoch+1} testing')
+            data, target = data.to(device), target.to(device)
+            outputs = model(data)
+            preds = outputs.argmax(dim=1)
+            acc += torch.sum(preds.eq(target)).item()
+
+        acc = acc / len(test_loader.dataset)
+        print(f'acc = {100 * acc}%')
         if acc > highest_acc:
             highest_acc = acc
             save_model(highest_acc, model)
-    save_model('stop', model)
+    save_model('last_checkpoint', model)
 
     print('Load the saved checkpoint to check')
     net = Bayes_LeNet5()
-    model.load_state_dict(torch.load('checkpoint/stop.pt'))
-    eval_model(model, test_loader, epoch, device)
+    model.load_state_dict(torch.load('checkpoint/last_checkpoint.pt'))
+    model.eval()
+    acc = 0.
+    pbar_testing = tqdm(test_loader)
+    for i, (data, target) in enumerate(pbar_testing):
+        pbar_testing.set_description(f'Epoch={epoch+1} testing')
+        data, target = data.to(device), target.to(device)
+        outputs = model(data)
+        preds = outputs.argmax(dim=1)
+        acc += torch.sum(preds.eq(target)).item()
+
+    acc = acc / len(test_loader.dataset)
+    print(f'acc = {100 * acc}%')
