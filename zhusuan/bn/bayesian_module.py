@@ -6,13 +6,15 @@ import numpy as np
 
 class BModule(nn.Module):
 
-    def init(self):
+    def __init__(self):
         super().__init__()
+        self.is_variational = False
 
     def forward(self, x):
         raise NotImplementedError()
 
     def elbo_estimator(self, data, target, n_samples, criterion, len_dataset, batch_size, batch_idx=None, weight_type='Graves'):
+        self.is_variational = True
         loss = 0.
         for _ in range(n_samples):
             outputs = self(data)
@@ -22,6 +24,15 @@ class BModule(nn.Module):
                                                                        batch_idx,
                                                                        weight_type)
         return loss / n_samples
+
+    def sgld_estimator(self, data, target, criterion, len_dataset, batch_size):
+        self.is_variational = False
+        loss = 0.
+        outputs = self(data)
+        loss -= criterion(outputs, target) * len_dataset
+        for _, layer in self._modules.items():
+            loss += layer.log_prior / batch_size
+        return loss
 
     def kl_divergence(self):
         kl_divergence = 0.

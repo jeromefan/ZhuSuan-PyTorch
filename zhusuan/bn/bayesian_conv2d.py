@@ -52,23 +52,26 @@ class BConv2d(BModule):
         weight_distribution = Normal(mean=self.weight_mu, std=torch.log1p(
             torch.exp(self.weight_rho)), device=x.device)
         weight = weight_distribution._sample()
-        weight_log_posterior = weight_distribution._log_prob().sum()
         weight_log_prior = self.weight_prior_distribution.log_prior(weight)
 
         if self.bias:
             bias_distribution = Normal(mean=self.bias_mu, std=torch.log1p(
                 torch.exp(self.bias_rho)), device=x.device)
             bias = bias_distribution._sample()
-            bias_log_posterior = bias_distribution._log_prob().sum()
             bias_log_prior = self.bias_prior_distribution.log_prior(bias)
         else:
             bias = torch.zeros((self.out_channels), device=x.device)
-            bias_log_posterior = 0
-            bias_log_prior = 0
+            bias_log_prior = 0.
 
-        # Complexity Cost
-        self.log_variational_posterior = weight_log_posterior + bias_log_posterior
         self.log_prior = weight_log_prior + bias_log_prior
+
+        if self.is_variational:
+            weight_log_posterior = weight_distribution._log_prob().sum()
+            if self.bias:
+                bias_log_posterior = bias_distribution._log_prob().sum()
+            else:
+                bias_log_posterior = 0.
+            self.log_variational_posterior = weight_log_posterior + bias_log_posterior
 
         return F.conv2d(input=x,
                         weight=weight,
